@@ -1,0 +1,253 @@
+2️⃣ DBT Project Structure
+
+When you run dbt init, you get a project like:
+
+dbt_project.yml
+models/
+   staging/
+   marts/
+   core/
+seeds/
+tests/
+macros/
+
+
+models/ → SQL files that define transformations.
+
+seeds/ → CSV files that can be loaded as tables.
+
+tests/ → data quality checks.
+
+macros/ → reusable SQL logic with Jinja.
+
+dbt_project.yml → configuration file.
+
+3️⃣ Models
+
+A model is just a .sql file in the models/ folder.
+
+🔹 Example: models/staging/stg_customers.sql
+
+{{ config(materialized='view') }}
+
+SELECT
+    id AS customer_id,
+    name,
+    email,
+    created_at
+FROM raw.customers;
+
+
+👉 Run:
+
+dbt run --select stg_customers
+
+
+This will create a view in Snowflake.
+
+4️⃣ Materializations
+
+Defines how DBT builds the model.
+Options: view, table, incremental, ephemeral.
+
+(a) View
+{{ config(materialized='view') }}
+SELECT * FROM raw.customers;
+
+(b) Table
+{{ config(materialized='table') }}
+SELECT * FROM raw.orders;
+
+(c) Incremental
+
+Good for large tables (only new data is added).
+
+{{ config(
+    materialized='incremental',
+    unique_key='order_id'
+) }}
+
+SELECT *
+FROM raw.orders
+{% if is_incremental() %}
+  WHERE updated_at > (SELECT MAX(updated_at) FROM {{ this }})
+{% endif %}
+
+(d) Ephemeral
+
+Used only in DBT compile, not in warehouse.
+
+{{ config(materialized='ephemeral') }}
+SELECT * FROM raw.temp_data;
+
+5️⃣ Sources
+
+Define external tables as sources in schema.yml.
+
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: customers
+      - name: orders
+
+
+Then use in SQL:
+
+SELECT * FROM {{ source('raw', 'customers') }}
+
+6️⃣ Seeds
+
+CSV files that DBT loads into warehouse.
+
+🔹 Example:
+seeds/country_codes.csv
+
+country_code,country_name
+IN,India
+US,United States
+
+
+Load it:
+
+dbt seed
+
+
+Then query:
+
+SELECT * FROM {{ ref('country_codes') }}
+
+7️⃣ Tests
+
+Used for data quality.
+
+Built-in Tests
+
+In schema.yml:
+
+models:
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+
+
+Run:
+
+dbt test
+
+Custom Test
+
+tests/positive_amount.sql
+
+SELECT *
+FROM {{ ref('stg_orders') }}
+WHERE amount < 0
+
+8️⃣ Documentation
+
+DBT auto-generates docs.
+
+models:
+  - name: stg_customers
+    description: "Staging model for customers"
+    columns:
+      - name: customer_id
+        description: "Unique ID for customers"
+
+
+Build docs:
+
+dbt docs generate
+dbt docs serve
+
+9️⃣ Jinja & Macros
+
+DBT uses Jinja templating.
+
+🔹 Example Macro: macros/get_country.sql
+
+{% macro get_country_name(code) %}
+    CASE
+        WHEN {{ code }} = 'IN' THEN 'India'
+        WHEN {{ code }} = 'US' THEN 'United States'
+        ELSE 'Unknown'
+    END
+{% endmacro %}
+
+
+Use in model:
+
+SELECT
+    id,
+    {{ get_country_name('country_code') }} AS country
+FROM raw.customers;
+
+🔟 Hooks & Operations
+
+Run SQL before/after model build.
+
+{{ config(
+    materialized='table',
+    pre_hook="DELETE FROM audit_log WHERE model='orders'",
+    post_hook="INSERT INTO audit_log VALUES('orders', current_timestamp)"
+) }}
+
+SELECT * FROM raw.orders;
+
+1️⃣1️⃣ Snapshots
+
+Used to track historical changes (SCD Type 2).
+
+snapshots/customer_snapshot.sql
+
+{% snapshot customer_snapshot %}
+{{ config(
+    target_schema='snapshots',
+    unique_key='customer_id',
+    strategy='timestamp',
+    updated_at='updated_at'
+) }}
+
+SELECT * FROM raw.customers;
+{% endsnapshot %}
+
+
+Run:
+
+dbt snapshot
+
+1️⃣2️⃣ Deployment Flow (Real-Time)
+
+dev branch → developers build new models.
+
+test branch → QA validates models.
+
+main branch → production-ready models.
+
+CI/CD (GitHub Actions, dbt Cloud, or Airflow) deploys automatically.
+
+✅ Summary of DBT Concepts
+
+Models → SQL transformations
+
+Materializations → View, Table, Incremental, Ephemeral
+
+Sources → raw data mapping
+
+Seeds → load CSV files
+
+Tests → data quality
+
+Documentation → docs site
+
+Jinja/Macros → reusable SQL
+
+Hooks → pre/post SQL actions
+
+Snapshots → historical tracking
+🔟 Deployment → CI/CD
